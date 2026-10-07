@@ -23,16 +23,23 @@ export default {
           event.type === "message" &&
           event.message?.type === "text"
         ) {
+
           await replyMessage(
-  event.replyToken,
-  `Webhook 收到：${event.message.text}\n\nGroup ID：${event.source?.groupId || "不是群組事件"}`,
-  env
-);
-await pushMessage(
-  "📢 化工廠巡檢\n\n這是一則群組推播測試。",
-  env
-);          
+            event.replyToken,
+            `Webhook 收到：${event.message.text}\n\nGroup ID：${event.source?.groupId || "不是群組事件"}`,
+            env
+          );
+
+          // ===== 群組推播測試 =====
+          if (event.source?.type === "group") {
+
+            await pushMessage(
+              "📢 化工廠巡檢\n\n這是一則群組推播測試。",
+              env
+            );
+          }
         }
+
 
         // ===== Excel 檔案 =====
         else if (
@@ -55,11 +62,13 @@ await pushMessage(
           );
 
           if (!response.ok) {
+
             await replyMessage(
               event.replyToken,
               `❌ Excel 下載失敗\nHTTP：${response.status}`,
               env
             );
+
             continue;
           }
 
@@ -75,11 +84,13 @@ await pushMessage(
           );
 
           if (!targetSheet) {
+
             await replyMessage(
               event.replyToken,
               `❌ 找不到「僅異常」工作表\n\n目前工作表：\n${workbook.SheetNames.join("\n")}`,
               env
             );
+
             continue;
           }
 
@@ -93,13 +104,15 @@ await pushMessage(
             }
           );
 
-          // 沒有異常資料
+          // ===== 沒有異常資料 =====
           if (rows.length <= 1) {
+
             await replyMessage(
               event.replyToken,
               `✅ ${fileName}\n\n今日沒有異常巡檢紀錄。`,
               env
             );
+
             continue;
           }
 
@@ -157,6 +170,7 @@ await pushMessage(
               `${record.area}|||${record.equipment}`;
 
             if (!groups[key]) {
+
               groups[key] = {
                 area: record.area,
                 equipment: record.equipment,
@@ -182,6 +196,7 @@ await pushMessage(
               report += `\n🔸 ${record.item}\n`;
 
               if (record.value !== "") {
+
                 report += `數值：${record.value}`;
 
                 if (record.unit) {
@@ -191,11 +206,12 @@ await pushMessage(
                 report += "\n";
               }
 
-              // 正常範圍
+              // ===== 正常範圍 =====
               if (
                 record.lower !== "" &&
                 record.upper !== ""
               ) {
+
                 report +=
                   `正常範圍：${record.lower}～${record.upper}`;
 
@@ -205,6 +221,7 @@ await pushMessage(
 
                 report += "\n";
               }
+
               else if (record.lower !== "") {
 
                 report +=
@@ -216,6 +233,7 @@ await pushMessage(
 
                 report += "\n";
               }
+
               else if (record.upper !== "") {
 
                 report +=
@@ -237,7 +255,8 @@ await pushMessage(
               }
 
               if (record.reason) {
-                report += `處置／現場狀況：${record.reason}\n`;
+                report +=
+                  `處置／現場狀況：${record.reason}\n`;
               }
             }
 
@@ -247,15 +266,27 @@ await pushMessage(
           report += "\n━━━━━━━━━━━━━━\n";
           report += `📋 異常項目合計：${records.length}`;
 
+          // ===== 回覆傳送 Excel 的人 =====
           await replyMessage(
             event.replyToken,
             report,
             env
           );
+
+          // ===== 如果 Excel 是在群組裡傳的，同時推播到該群組 =====
+          if (event.source?.type === "group") {
+
+            await pushMessage(
+              report,
+              env
+            );
+          }
         }
       }
 
-      return new Response("OK", { status: 200 });
+      return new Response("OK", {
+        status: 200
+      });
 
     } catch (error) {
 
@@ -287,39 +318,15 @@ function getCell(row, col, name) {
 
 // ===== 回覆 LINE =====
 async function replyMessage(replyToken, text, env) {
-async function pushMessage(text, env) {
 
-  await fetch(
-    "https://api.line.me/v2/bot/message/push",
-    {
-      method: "POST",
-
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization":
-          `Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}`
-      },
-
-      body: JSON.stringify({
-        to: env.LINE_GROUP_ID,
-
-        messages: [
-          {
-            type: "text",
-            text: text
-          }
-        ]
-      })
-    }
-  );
-}
   if (text.length > 4900) {
+
     text =
       text.substring(0, 4900) +
       "\n\n⚠️ 顯示內容過長，已截斷";
   }
 
-  await fetch(
+  const response = await fetch(
     "https://api.line.me/v2/bot/message/reply",
     {
       method: "POST",
@@ -342,4 +349,56 @@ async function pushMessage(text, env) {
       })
     }
   );
+
+  const result = await response.text();
+
+  console.log(
+    "LINE REPLY:",
+    response.status,
+    result
+  );
+}
+
+
+// ===== LINE 群組推播 =====
+async function pushMessage(text, env) {
+
+  const response = await fetch(
+    "https://api.line.me/v2/bot/message/push",
+    {
+      method: "POST",
+
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization":
+          `Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}`
+      },
+
+      body: JSON.stringify({
+        to: env.LINE_GROUP_ID,
+
+        messages: [
+          {
+            type: "text",
+            text: text
+          }
+        ]
+      })
+    }
+  );
+
+  const result = await response.text();
+
+  console.log(
+    "LINE PUSH:",
+    response.status,
+    result
+  );
+
+  if (!response.ok) {
+
+    throw new Error(
+      `LINE Push API ${response.status}: ${result}`
+    );
+  }
 }
