@@ -28,6 +28,10 @@ export default {
   `Webhook 收到：${event.message.text}\n\nGroup ID：${event.source?.groupId || "不是群組事件"}`,
   env
 );
+await pushMessage(
+  "📢 化工廠巡檢\n\n這是一則群組推播測試。",
+  env
+);          
         }
 
         // ===== Excel 檔案 =====
