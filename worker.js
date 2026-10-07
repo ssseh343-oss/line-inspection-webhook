@@ -10,10 +10,7 @@ export default {
       const body = await request.json();
 
       for (const event of body.events || []) {
-  if (event.source && event.source.type === "group") {
-    console.log("GROUP ID:", event.source.groupId);
-    continue;
-  }
+if (event.source && event.source.type === "group") continue;
 
         if (event.type !== "message") continue;
 
