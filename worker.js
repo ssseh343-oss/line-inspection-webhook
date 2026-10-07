@@ -3,30 +3,20 @@ import * as XLSX from "xlsx";
 export default {
   async fetch(request, env) {
     if (request.method !== "POST") {
-      return new Response("LINE Inspection Webhook OK", {
-        status: 200
-      });
+      return new Response("LINE Inspection Webhook OK");
     }
 
     try {
       const body = await request.json();
 
-      if (!body.events || body.events.length === 0) {
-        return new Response("OK", { status: 200 });
-      }
+      for (const event of body.events || []) {
 
-      for (const event of body.events) {
-
-        // ==================================================
-        // 群組事件：全部忽略
-        // ==================================================
+        // 群組訊息全部忽略
         if (event.source?.type === "group") {
           continue;
         }
 
-        // ==================================================
-        // 一對一文字訊息
-        // ==================================================
+        // 私訊文字
         if (
           event.type === "message" &&
           event.message?.type === "text"
@@ -36,181 +26,297 @@ export default {
             `Webhook 收到：${event.message.text}`,
             env
           );
-
           continue;
         }
 
-        // ==================================================
-        // 一對一 Excel 檔案
-        // ==================================================
+        // 私訊 Excel
         if (
           event.type === "message" &&
           event.message?.type === "file"
         ) {
-          const fileName = event.message.fileName;
-          const messageId = event.message.id;
+          await handleExcel(event, env);
+        }
+      }
 
-          // ------------------------------------------------
-          // 從 LINE 下載 Excel
-          // ------------------------------------------------
-          const response = await fetch(
-            `https://api-data.line.me/v2/bot/message/${messageId}/content`,
-            {
-              headers: {
-                "Authorization":
-                  `Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}`
-              }
-            }
-          );
+      return new Response("OK");
 
-          if (!response.ok) {
-            await replyMessage(
-              event.replyToken,
-              `❌ Excel 下載失敗\nHTTP：${response.status}`,
-              env
-            );
+    } catch (error) {
+      console.error(error);
+      return new Response("OK");
+    }
+  }
+};
 
-            continue;
-          }
 
-          const buffer = await response.arrayBuffer();
+// ================================================
+// Excel 處理
+// ================================================
 
-          // ------------------------------------------------
-          // 解析 Excel
-          // ------------------------------------------------
-          const workbook = XLSX.read(buffer, {
-            type: "array"
-          });
+async function handleExcel(event, env) {
 
-          const targetSheet = workbook.SheetNames.find(
-            name => name.trim() === "僅異常"
-          );
+  const fileName = event.message.fileName;
+  const messageId = event.message.id;
 
-          if (!targetSheet) {
-            await replyMessage(
-              event.replyToken,
-              `❌ 找不到「僅異常」工作表\n\n目前工作表：\n${workbook.SheetNames.join("\n")}`,
-              env
-            );
+  const response = await fetch(
+    `https://api-data.line.me/v2/bot/message/${messageId}/content`,
+    {
+      headers: {
+        Authorization:
+          `Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}`
+      }
+    }
+  );
 
-            continue;
-          }
+  if (!response.ok) {
+    await replyMessage(
+      event.replyToken,
+      `❌ Excel 下載失敗\nHTTP：${response.status}`,
+      env
+    );
+    return;
+  }
 
-          const worksheet = workbook.Sheets[targetSheet];
+  const buffer = await response.arrayBuffer();
 
-          const rows = XLSX.utils.sheet_to_json(
-            worksheet,
-            {
-              header: 1,
-              defval: ""
-            }
-          );
+  const workbook = XLSX.read(buffer, {
+    type: "array"
+  });
 
-          // ------------------------------------------------
-          // 沒有異常
-          // ------------------------------------------------
-          if (rows.length <= 1) {
-            const message =
-              `✅ ${fileName}\n\n今日沒有異常巡檢紀錄。`;
+  const targetSheet = workbook.SheetNames.find(
+    name => name.trim() === "僅異常"
+  );
 
-            await replyMessage(
-              event.replyToken,
-              message,
-              env
-            );
+  if (!targetSheet) {
+    await replyMessage(
+      event.replyToken,
+      `❌ 找不到「僅異常」工作表\n\n目前工作表：\n${workbook.SheetNames.join("\n")}`,
+      env
+    );
+    return;
+  }
 
-            await pushMessage(
-              message,
-              env
-            );
+  const worksheet = workbook.Sheets[targetSheet];
 
-            continue;
-          }
+  const rows = XLSX.utils.sheet_to_json(
+    worksheet,
+    {
+      header: 1,
+      defval: ""
+    }
+  );
 
-          // ------------------------------------------------
-          // 建立欄位索引
-          // ------------------------------------------------
-          const headers = rows[0];
-          const col = {};
+  if (rows.length <= 1) {
 
-          headers.forEach((header, index) => {
-            col[String(header).trim()] = index;
-          });
+    const message =
+      `✅ ${fileName}\n\n今日沒有異常巡檢紀錄。`;
 
-          // ------------------------------------------------
-          // 讀取異常資料
-          // ------------------------------------------------
-          const records = rows
-            .slice(1)
-            .filter(row =>
-              row.some(cell => String(cell).trim() !== "")
-            )
-            .map(row => ({
-              date: getCell(row, col, "日期"),
-              time: getCell(row, col, "時間"),
-              inspector: getCell(row, col, "巡檢人員"),
-              shift: getCell(row, col, "班別"),
-              area: getCell(row, col, "廠區"),
-              equipment: getCell(row, col, "設備"),
-              item: getCell(row, col, "巡檢項目"),
-              value: getCell(row, col, "數值"),
-              status: getCell(row, col, "狀態"),
-              unit: getCell(row, col, "單位"),
-              lower: getCell(row, col, "下限"),
-              upper: getCell(row, col, "上限"),
-              judgment: getCell(row, col, "判定"),
-              reason: getCell(row, col, "異常原因/現場狀況")
-            }));
+    await replyMessage(
+      event.replyToken,
+      message,
+      env
+    );
 
-          // ------------------------------------------------
-          // 組成報告
-          // ------------------------------------------------
-          let report = "🚨 化工廠巡檢異常\n\n";
+    await pushMessage(
+      message,
+      env
+    );
 
-          if (records[0].date) {
-            report += `📅 ${records[0].date}\n`;
-          }
+    return;
+  }
 
-          if (records[0].inspector) {
-            report += `👤 ${records[0].inspector}\n`;
-          }
+  const headers = rows[0];
+  const col = {};
 
-          report += `⚠️ 共 ${records.length} 項異常\n`;
+  headers.forEach((header, index) => {
+    col[String(header).trim()] = index;
+  });
 
-          // ------------------------------------------------
-          // 依廠區 + 設備分組
-          // ------------------------------------------------
-          const groups = {};
+  const records = rows
+    .slice(1)
+    .filter(row =>
+      row.some(cell =>
+        String(cell).trim() !== ""
+      )
+    )
+    .map(row => ({
+      date: getCell(row, col, "日期"),
+      time: getCell(row, col, "時間"),
+      inspector: getCell(row, col, "巡檢人員"),
+      shift: getCell(row, col, "班別"),
+      area: getCell(row, col, "廠區"),
+      equipment: getCell(row, col, "設備"),
+      item: getCell(row, col, "巡檢項目"),
+      value: getCell(row, col, "數值"),
+      status: getCell(row, col, "狀態"),
+      unit: getCell(row, col, "單位"),
+      lower: getCell(row, col, "下限"),
+      upper: getCell(row, col, "上限"),
+      judgment: getCell(row, col, "判定"),
+      reason: getCell(row, col, "異常原因/現場狀況")
+    }));
 
-          for (const record of records) {
-            const key =
-              `${record.area}|||${record.equipment}`;
+  const report = buildReport(records);
 
-            if (!groups[key]) {
-              groups[key] = {
-                area: record.area,
-                equipment: record.equipment,
-                records: []
-              };
-            }
+  // 回覆傳 Excel 的人
+  await replyMessage(
+    event.replyToken,
+    report,
+    env
+  );
 
-            groups[key].records.push(record);
-          }
+  // 推播到指定群組
+  await pushMessage(
+    report,
+    env
+  );
+}
 
-          let groupNumber = 1;
 
-          for (const key of Object.keys(groups)) {
-            const group = groups[key];
+// ================================================
+// 建立異常報告
+// ================================================
 
-            report += "\n";
-            report += "━━━━━━━━━━━━━━\n";
-            report +=
-              `${groupNumber}. ${group.area}｜${group.equipment}\n`;
+function buildReport(records) {
 
-            for (const record of group.records) {
-              report += `\n🔸 ${record.item}\n`;
+  let report =
+    "🚨 化工廠巡檢異常\n\n";
 
-              if (record.value !== "") {
-                report += `數值：${record.value}`;
+  if (records[0].date) {
+    report += `📅 ${records[0].date}\n`;
+  }
 
-                if (record.unit) {
+  if (records[0].inspector) {
+    report += `👤 ${records[0].inspector}\n`;
+  }
+
+  report +=
+    `⚠️ 共 ${records.length} 項異常\n`;
+
+  const groups = {};
+
+  for (const record of records) {
+
+    const key =
+      `${record.area}|||${record.equipment}`;
+
+    if (!groups[key]) {
+      groups[key] = {
+        area: record.area,
+        equipment: record.equipment,
+        records: []
+      };
+    }
+
+    groups[key].records.push(record);
+  }
+
+  let groupNumber = 1;
+
+  for (const key of Object.keys(groups)) {
+
+    const group = groups[key];
+
+    report +=
+      "\n━━━━━━━━━━━━━━\n";
+
+    report +=
+      `${groupNumber}. ${group.area}｜${group.equipment}\n`;
+
+    for (const record of group.records) {
+
+      report +=
+        `\n🔸 ${record.item}\n`;
+
+      if (record.value !== "") {
+
+        report +=
+          `數值：${record.value}`;
+
+        if (record.unit) {
+          report +=
+            ` ${record.unit}`;
+        }
+
+        report += "\n";
+      }
+
+      if (
+        record.lower !== "" &&
+        record.upper !== ""
+      ) {
+
+        report +=
+          `正常範圍：${record.lower}～${record.upper}`;
+
+        if (record.unit) {
+          report +=
+            ` ${record.unit}`;
+        }
+
+        report += "\n";
+
+      } else if (record.lower !== "") {
+
+        report +=
+          `正常下限：${record.lower}`;
+
+        if (record.unit) {
+          report +=
+            ` ${record.unit}`;
+        }
+
+        report += "\n";
+
+      } else if (record.upper !== "") {
+
+        report +=
+          `正常上限：${record.upper}`;
+
+        if (record.unit) {
+          report +=
+            ` ${record.unit}`;
+        }
+
+        report += "\n";
+      }
+
+      if (record.status) {
+        report +=
+          `狀態：${record.status}\n`;
+      }
+
+      if (record.judgment) {
+        report +=
+          `判定：${record.judgment}\n`;
+      }
+
+      if (record.reason) {
+        report +=
+          `處置／現場狀況：${record.reason}\n`;
+      }
+    }
+
+    groupNumber++;
+  }
+
+  report +=
+    "\n━━━━━━━━━━━━━━\n";
+
+  report +=
+    `📋 異常項目合計：${records.length}`;
+
+  return report;
+}
+
+
+// ================================================
+// Excel 儲存格
+// ================================================
+
+function getCell(row, col, name) {
+
+  const index = col[name];
+
+  if (index === undefined) {
+    return "";
+  }
