@@ -24,10 +24,10 @@ export default {
           event.message?.type === "text"
         ) {
           await replyMessage(
-            event.replyToken,
-            `Webhook 收到：${event.message.text}`,
-            env
-          );
+  event.replyToken,
+  `Webhook 收到：${event.message.text}\n\nGroup ID：${event.source?.groupId || "不是群組事件"}`,
+  env
+);
         }
 
         // ===== Excel 檔案 =====
