@@ -66,28 +66,19 @@ export default {
             type: "array"
           });
 
-          const sheetNames = workbook.SheetNames;
-
-          // 找「僅異常」
-          const targetSheet = sheetNames.find(
+          const targetSheet = workbook.SheetNames.find(
             name => name.trim() === "僅異常"
           );
 
           if (!targetSheet) {
-
             await replyMessage(
               event.replyToken,
-              `❌ 找不到「僅異常」工作表
-
-目前 Excel 工作表：
-${sheetNames.join("\n")}`,
+              `❌ 找不到「僅異常」工作表\n\n目前工作表：\n${workbook.SheetNames.join("\n")}`,
               env
             );
-
             continue;
           }
 
-          // 轉成二維陣列
           const worksheet = workbook.Sheets[targetSheet];
 
           const rows = XLSX.utils.sheet_to_json(
@@ -98,25 +89,163 @@ ${sheetNames.join("\n")}`,
             }
           );
 
-          // ===== 整理成文字 =====
-          let output = `📊 已成功讀取「僅異常」
-
-檔案：${fileName}
-
-共 ${rows.length} 列
-
-`;
-
-          // 最多顯示前 15 列
-          const displayRows = rows.slice(0, 15);
-
-          for (const row of displayRows) {
-            output += row.join(" ｜ ") + "\n";
+          // 沒有異常資料
+          if (rows.length <= 1) {
+            await replyMessage(
+              event.replyToken,
+              `✅ ${fileName}\n\n今日沒有異常巡檢紀錄。`,
+              env
+            );
+            continue;
           }
+
+          // ===== 建立欄位索引 =====
+          const headers = rows[0];
+
+          const col = {};
+
+          headers.forEach((header, index) => {
+            col[String(header).trim()] = index;
+          });
+
+          // ===== 讀取資料 =====
+          const records = rows
+            .slice(1)
+            .filter(row =>
+              row.some(cell => String(cell).trim() !== "")
+            )
+            .map(row => ({
+              date: getCell(row, col, "日期"),
+              time: getCell(row, col, "時間"),
+              inspector: getCell(row, col, "巡檢人員"),
+              shift: getCell(row, col, "班別"),
+              area: getCell(row, col, "廠區"),
+              equipment: getCell(row, col, "設備"),
+              item: getCell(row, col, "巡檢項目"),
+              value: getCell(row, col, "數值"),
+              status: getCell(row, col, "狀態"),
+              unit: getCell(row, col, "單位"),
+              lower: getCell(row, col, "下限"),
+              upper: getCell(row, col, "上限"),
+              judgment: getCell(row, col, "判定"),
+              reason: getCell(row, col, "異常原因/現場狀況")
+            }));
+
+          // ===== 組成漂亮報告 =====
+          let report = "🚨 化工廠巡檢異常\n\n";
+
+          if (records[0].date) {
+            report += `📅 ${records[0].date}\n`;
+          }
+
+          if (records[0].inspector) {
+            report += `👤 ${records[0].inspector}\n`;
+          }
+
+          report += `⚠️ 共 ${records.length} 項異常\n`;
+
+          // ===== 依廠區 + 設備分組 =====
+          const groups = {};
+
+          for (const record of records) {
+
+            const key =
+              `${record.area}|||${record.equipment}`;
+
+            if (!groups[key]) {
+              groups[key] = {
+                area: record.area,
+                equipment: record.equipment,
+                records: []
+              };
+            }
+
+            groups[key].records.push(record);
+          }
+
+          let groupNumber = 1;
+
+          for (const key of Object.keys(groups)) {
+
+            const group = groups[key];
+
+            report += "\n";
+            report += `━━━━━━━━━━━━━━\n`;
+            report += `${groupNumber}. ${group.area}｜${group.equipment}\n`;
+
+            for (const record of group.records) {
+
+              report += `\n🔸 ${record.item}\n`;
+
+              if (record.value !== "") {
+                report += `數值：${record.value}`;
+
+                if (record.unit) {
+                  report += ` ${record.unit}`;
+                }
+
+                report += "\n";
+              }
+
+              // 正常範圍
+              if (
+                record.lower !== "" &&
+                record.upper !== ""
+              ) {
+                report +=
+                  `正常範圍：${record.lower}～${record.upper}`;
+
+                if (record.unit) {
+                  report += ` ${record.unit}`;
+                }
+
+                report += "\n";
+              }
+              else if (record.lower !== "") {
+
+                report +=
+                  `正常下限：${record.lower}`;
+
+                if (record.unit) {
+                  report += ` ${record.unit}`;
+                }
+
+                report += "\n";
+              }
+              else if (record.upper !== "") {
+
+                report +=
+                  `正常上限：${record.upper}`;
+
+                if (record.unit) {
+                  report += ` ${record.unit}`;
+                }
+
+                report += "\n";
+              }
+
+              if (record.status) {
+                report += `狀態：${record.status}\n`;
+              }
+
+              if (record.judgment) {
+                report += `判定：${record.judgment}\n`;
+              }
+
+              if (record.reason) {
+                report += `處置／現場狀況：${record.reason}\n`;
+              }
+            }
+
+            groupNumber++;
+          }
+
+          report += "\n━━━━━━━━━━━━━━\n";
+          report += `📋 異常項目合計：${records.length}`;
 
           await replyMessage(
             event.replyToken,
-            output,
+            report,
             env
           );
         }
@@ -139,11 +268,25 @@ ${sheetNames.join("\n")}`,
 };
 
 
+// ===== 取得 Excel 儲存格 =====
+function getCell(row, col, name) {
+
+  const index = col[name];
+
+  if (index === undefined) {
+    return "";
+  }
+
+  return String(row[index] ?? "").trim();
+}
+
+
+// ===== 回覆 LINE =====
 async function replyMessage(replyToken, text, env) {
 
-  // LINE 單則文字訊息最多 5000 字元
   if (text.length > 4900) {
-    text = text.substring(0, 4900) +
+    text =
+      text.substring(0, 4900) +
       "\n\n⚠️ 顯示內容過長，已截斷";
   }
 
