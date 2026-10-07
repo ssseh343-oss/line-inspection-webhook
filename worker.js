@@ -182,16 +182,15 @@ async function excel(event, env) {
     }
   );
 
-  if (rows.length <= 1) {
-    const msg =
-      "✅ " +
-      event.message.fileName +
-      "\n\n今日沒有異常巡檢紀錄。";
+ if (rows.length <= 1) {
+  const msg =
+    "✅ 化工廠巡檢完成\n\n" +
+    "📅 今日巡檢無異常";
 
-    await reply(event.replyToken, msg, env);
-    await push(msg, env);
-    return;
-  }
+  await reply(event.replyToken, msg, env);
+  await push(msg, env);
+  return;
+}
 
   const headers = rows[0];
   const col = {};
