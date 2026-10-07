@@ -1,3 +1,4 @@
+import * as XLSX from "xlsx";
 export default {
   async fetch(request, env) {
 
