@@ -248,4 +248,105 @@ function buildReport(records) {
       }
 
       if (record.status) {
-       
+        report += `狀態：${record.status}\n`;
+      }
+
+      if (record.judgment) {
+        report += `判定：${record.judgment}\n`;
+      }
+
+      if (record.reason) {
+        report += `處置／現場狀況：${record.reason}\n`;
+      }
+    }
+
+    groupNumber++;
+  }
+
+  report += "\n━━━━━━━━━━━━━━\n";
+  report += `📋 異常項目合計：${records.length}`;
+
+  return report;
+}
+
+function getCell(row, col, name) {
+  const index = col[name];
+
+  if (index === undefined) {
+    return "";
+  }
+
+  return String(row[index] ?? "").trim();
+}
+
+async function replyMessage(replyToken, text, env) {
+  if (text.length > 4900) {
+    text =
+      text.substring(0, 4900) +
+      "\n\n⚠️ 顯示內容過長，已截斷";
+  }
+
+  const response = await fetch(
+    "https://api.line.me/v2/bot/message/reply",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization:
+          Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}
+      },
+      body: JSON.stringify({
+        replyToken,
+        messages: [
+          {
+            type: "text",
+            text
+          }
+        ]
+      })
+    }
+  );
+
+  console.log(
+    "LINE REPLY:",
+    response.status,
+    await response.text()
+  );
+}
+
+async function pushMessage(text, env) {
+  const response = await fetch(
+    "https://api.line.me/v2/bot/message/push",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization:
+          Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}
+      },
+      body: JSON.stringify({
+        to: env.LINE_GROUP_ID,
+        messages: [
+          {
+            type: "text",
+            text
+          }
+        ]
+      })
+    }
+  );
+
+  const result = await response.text();
+
+  console.log(
+    "LINE PUSH:",
+    response.status,
+    result
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      LINE Push API ${response.status}: ${result}
+    );
+  }
+}
