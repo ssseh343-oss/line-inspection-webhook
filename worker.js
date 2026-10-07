@@ -10,17 +10,11 @@ export default {
       const body = await request.json();
 
       for (const event of body.events || []) {
-
         // 群組訊息全部忽略
-        if (event.source?.type === "group") {
-          continue;
-        }
+        if (event.source?.type === "group") continue;
 
         // 私訊文字
-        if (
-          event.type === "message" &&
-          event.message?.type === "text"
-        ) {
+        if (event.type === "message" && event.message?.type === "text") {
           await replyMessage(
             event.replyToken,
             `Webhook 收到：${event.message.text}`,
@@ -30,30 +24,20 @@ export default {
         }
 
         // 私訊 Excel
-        if (
-          event.type === "message" &&
-          event.message?.type === "file"
-        ) {
+        if (event.type === "message" && event.message?.type === "file") {
           await handleExcel(event, env);
         }
       }
 
       return new Response("OK");
-
     } catch (error) {
-      console.error(error);
+      console.error("Webhook error:", error);
       return new Response("OK");
     }
   }
 };
 
-
-// ================================================
-// Excel 處理
-// ================================================
-
 async function handleExcel(event, env) {
-
   const fileName = event.message.fileName;
   const messageId = event.message.id;
 
@@ -61,8 +45,7 @@ async function handleExcel(event, env) {
     `https://api-data.line.me/v2/bot/message/${messageId}/content`,
     {
       headers: {
-        Authorization:
-          `Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}`
+        Authorization: `Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}`
       }
     }
   );
@@ -95,10 +78,8 @@ async function handleExcel(event, env) {
     return;
   }
 
-  const worksheet = workbook.Sheets[targetSheet];
-
   const rows = XLSX.utils.sheet_to_json(
-    worksheet,
+    workbook.Sheets[targetSheet],
     {
       header: 1,
       defval: ""
@@ -106,7 +87,6 @@ async function handleExcel(event, env) {
   );
 
   if (rows.length <= 1) {
-
     const message =
       `✅ ${fileName}\n\n今日沒有異常巡檢紀錄。`;
 
@@ -171,21 +151,15 @@ async function handleExcel(event, env) {
   );
 }
 
-
-// ================================================
-// 建立異常報告
-// ================================================
-
 function buildReport(records) {
-
   let report =
     "🚨 化工廠巡檢異常\n\n";
 
-  if (records[0].date) {
+  if (records[0]?.date) {
     report += `📅 ${records[0].date}\n`;
   }
 
-  if (records[0].inspector) {
+  if (records[0]?.inspector) {
     report += `👤 ${records[0].inspector}\n`;
   }
 
@@ -195,7 +169,6 @@ function buildReport(records) {
   const groups = {};
 
   for (const record of records) {
-
     const key =
       `${record.area}|||${record.equipment}`;
 
@@ -213,7 +186,6 @@ function buildReport(records) {
   let groupNumber = 1;
 
   for (const key of Object.keys(groups)) {
-
     const group = groups[key];
 
     report +=
@@ -223,12 +195,10 @@ function buildReport(records) {
       `${groupNumber}. ${group.area}｜${group.equipment}\n`;
 
     for (const record of group.records) {
-
       report +=
         `\n🔸 ${record.item}\n`;
 
       if (record.value !== "") {
-
         report +=
           `數值：${record.value}`;
 
@@ -244,7 +214,6 @@ function buildReport(records) {
         record.lower !== "" &&
         record.upper !== ""
       ) {
-
         report +=
           `正常範圍：${record.lower}～${record.upper}`;
 
@@ -256,7 +225,6 @@ function buildReport(records) {
         report += "\n";
 
       } else if (record.lower !== "") {
-
         report +=
           `正常下限：${record.lower}`;
 
@@ -268,7 +236,6 @@ function buildReport(records) {
         report += "\n";
 
       } else if (record.upper !== "") {
-
         report +=
           `正常上限：${record.upper}`;
 
@@ -281,42 +248,4 @@ function buildReport(records) {
       }
 
       if (record.status) {
-        report +=
-          `狀態：${record.status}\n`;
-      }
-
-      if (record.judgment) {
-        report +=
-          `判定：${record.judgment}\n`;
-      }
-
-      if (record.reason) {
-        report +=
-          `處置／現場狀況：${record.reason}\n`;
-      }
-    }
-
-    groupNumber++;
-  }
-
-  report +=
-    "\n━━━━━━━━━━━━━━\n";
-
-  report +=
-    `📋 異常項目合計：${records.length}`;
-
-  return report;
-}
-
-
-// ================================================
-// Excel 儲存格
-// ================================================
-
-function getCell(row, col, name) {
-
-  const index = col[name];
-
-  if (index === undefined) {
-    return "";
-  }
+       
