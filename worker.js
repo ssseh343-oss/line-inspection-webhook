@@ -293,8 +293,8 @@ async function replyMessage(replyToken, text, env) {
       headers: {
         "Content-Type": "application/json",
         Authorization:
-          Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}
-      },
+          `Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}
+      }`,
       body: JSON.stringify({
         replyToken,
         messages: [
