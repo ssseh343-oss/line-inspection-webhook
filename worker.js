@@ -11,20 +11,29 @@ export default {
 
       for (const event of body.events || []) {
         // 群組訊息全部忽略
-        if (event.source?.type === "group") continue;
+        if (event.source?.type === "group") {
+          continue;
+        }
 
         // 私訊文字
-        if (event.type === "message" && event.message?.type === "text") {
+        if (
+          event.type === "message" &&
+          event.message?.type === "text"
+        ) {
           await replyMessage(
             event.replyToken,
             `Webhook 收到：${event.message.text}`,
             env
           );
+
           continue;
         }
 
         // 私訊 Excel
-        if (event.type === "message" && event.message?.type === "file") {
+        if (
+          event.type === "message" &&
+          event.message?.type === "file"
+        ) {
           await handleExcel(event, env);
         }
       }
@@ -37,6 +46,11 @@ export default {
   }
 };
 
+
+// ========================================
+// Excel 處理
+// ========================================
+
 async function handleExcel(event, env) {
   const fileName = event.message.fileName;
   const messageId = event.message.id;
@@ -45,7 +59,7 @@ async function handleExcel(event, env) {
     `https://api-data.line.me/v2/bot/message/${messageId}/content`,
     {
       headers: {
-        Authorization: `Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}`
+        Authorization: Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}
       }
     }
   );
@@ -56,6 +70,7 @@ async function handleExcel(event, env) {
       `❌ Excel 下載失敗\nHTTP：${response.status}`,
       env
     );
+
     return;
   }
 
@@ -75,17 +90,21 @@ async function handleExcel(event, env) {
       `❌ 找不到「僅異常」工作表\n\n目前工作表：\n${workbook.SheetNames.join("\n")}`,
       env
     );
+
     return;
   }
 
+  const worksheet = workbook.Sheets[targetSheet];
+
   const rows = XLSX.utils.sheet_to_json(
-    workbook.Sheets[targetSheet],
+    worksheet,
     {
       header: 1,
       defval: ""
     }
   );
 
+  // 沒有異常
   if (rows.length <= 1) {
     const message =
       `✅ ${fileName}\n\n今日沒有異常巡檢紀錄。`;
@@ -104,6 +123,7 @@ async function handleExcel(event, env) {
     return;
   }
 
+  // 建立欄位索引
   const headers = rows[0];
   const col = {};
 
@@ -111,6 +131,7 @@ async function handleExcel(event, env) {
     col[String(header).trim()] = index;
   });
 
+  // 轉換資料
   const records = rows
     .slice(1)
     .filter(row =>
@@ -151,16 +172,23 @@ async function handleExcel(event, env) {
   );
 }
 
+
+// ========================================
+// 建立異常報告
+// ========================================
+
 function buildReport(records) {
   let report =
     "🚨 化工廠巡檢異常\n\n";
 
   if (records[0]?.date) {
-    report += `📅 ${records[0].date}\n`;
+    report +=
+      `📅 ${records[0].date}\n`;
   }
 
   if (records[0]?.inspector) {
-    report += `👤 ${records[0].inspector}\n`;
+    report +=
+      `👤 ${records[0].inspector}\n`;
   }
 
   report +=
@@ -198,6 +226,7 @@ function buildReport(records) {
       report +=
         `\n🔸 ${record.item}\n`;
 
+      // 數值
       if (record.value !== "") {
         report +=
           `數值：${record.value}`;
@@ -210,6 +239,7 @@ function buildReport(records) {
         report += "\n";
       }
 
+      // 正常範圍
       if (
         record.lower !== "" &&
         record.upper !== ""
@@ -218,135 +248,3 @@ function buildReport(records) {
           `正常範圍：${record.lower}～${record.upper}`;
 
         if (record.unit) {
-          report +=
-            ` ${record.unit}`;
-        }
-
-        report += "\n";
-
-      } else if (record.lower !== "") {
-        report +=
-          `正常下限：${record.lower}`;
-
-        if (record.unit) {
-          report +=
-            ` ${record.unit}`;
-        }
-
-        report += "\n";
-
-      } else if (record.upper !== "") {
-        report +=
-          `正常上限：${record.upper}`;
-
-        if (record.unit) {
-          report +=
-            ` ${record.unit}`;
-        }
-
-        report += "\n";
-      }
-
-      if (record.status) {
-        report += `狀態：${record.status}\n`;
-      }
-
-      if (record.judgment) {
-        report += `判定：${record.judgment}\n`;
-      }
-
-      if (record.reason) {
-        report += `處置／現場狀況：${record.reason}\n`;
-      }
-    }
-
-    groupNumber++;
-  }
-
-  report += "\n━━━━━━━━━━━━━━\n";
-  report += `📋 異常項目合計：${records.length}`;
-
-  return report;
-}
-
-function getCell(row, col, name) {
-  const index = col[name];
-
-  if (index === undefined) {
-    return "";
-  }
-
-  return String(row[index] ?? "").trim();
-}
-
-async function replyMessage(replyToken, text, env) {
-  if (text.length > 4900) {
-    text =
-      text.substring(0, 4900) +
-      "\n\n⚠️ 顯示內容過長，已截斷";
-  }
-
-  const response = await fetch(
-    "https://api.line.me/v2/bot/message/reply",
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization:
-          `Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}
-      }`,
-      body: JSON.stringify({
-        replyToken,
-        messages: [
-          {
-            type: "text",
-            text
-          }
-        ]
-      })
-    }
-  );
-
-  console.log(
-    "LINE REPLY:",
-    response.status,
-    await response.text()
-  );
-}
-
-async function pushMessage(text, env) {
-  const response = await fetch(
-    "https://api.line.me/v2/bot/message/push",
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization:
-          Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}
-      },
-      body: JSON.stringify({
-        to: env.LINE_GROUP_ID,
-        messages: [
-          {
-            type: "text",
-            text
-          }
-        ]
-      })
-    }
-  );
-
-  const result = await response.text();
-
-  console.log(
-    "LINE PUSH:",
-    response.status,
-    result
-  );
-
-  if (!response.ok) {
-    throw new Error(
-      LINE Push API ${response.status}: ${result}
-    );
-  }
-}
