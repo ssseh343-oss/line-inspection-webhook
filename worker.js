@@ -283,7 +283,32 @@ function getCell(row, col, name) {
 
 // ===== 回覆 LINE =====
 async function replyMessage(replyToken, text, env) {
+async function pushMessage(text, env) {
 
+  await fetch(
+    "https://api.line.me/v2/bot/message/push",
+    {
+      method: "POST",
+
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization":
+          `Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}`
+      },
+
+      body: JSON.stringify({
+        to: env.LINE_GROUP_ID,
+
+        messages: [
+          {
+            type: "text",
+            text: text
+          }
+        ]
+      })
+    }
+  );
+}
   if (text.length > 4900) {
     text =
       text.substring(0, 4900) +
