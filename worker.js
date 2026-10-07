@@ -18,7 +18,19 @@ export default {
 
       for (const event of body.events) {
 
-        // ===== 文字訊息 =====
+        // ==================================================
+        // 只處理「一對一私訊」
+        // 群組訊息全部忽略
+        // ==================================================
+
+        if (event.source?.type === "group") {
+          continue;
+        }
+
+        // ==================================================
+        // 一對一文字訊息
+        // ==================================================
+
         if (
           event.type === "message" &&
           event.message?.type === "text"
@@ -26,23 +38,18 @@ export default {
 
           await replyMessage(
             event.replyToken,
-            `Webhook 收到：${event.message.text}\n\nGroup ID：${event.source?.groupId || "不是群組事件"}`,
+            `Webhook 收到：${event.message.text}`,
             env
           );
 
-          // ===== 群組推播測試 =====
-          if (event.source?.type === "group") {
-
-            await pushMessage(
-              "📢 化工廠巡檢\n\n這是一則群組推播測試。",
-              env
-            );
-          }
+          continue;
         }
 
+        // ==================================================
+        // 一對一 Excel 檔案
+        // ==================================================
 
-        // ===== Excel 檔案 =====
-        else if (
+        if (
           event.type === "message" &&
           event.message?.type === "file"
         ) {
@@ -50,7 +57,10 @@ export default {
           const fileName = event.message.fileName;
           const messageId = event.message.id;
 
+          // --------------------------------------------------
           // 從 LINE 下載 Excel
+          // --------------------------------------------------
+
           const response = await fetch(
             `https://api-data.line.me/v2/bot/message/${messageId}/content`,
             {
@@ -74,7 +84,10 @@ export default {
 
           const buffer = await response.arrayBuffer();
 
-          // ===== 解析 Excel =====
+          // --------------------------------------------------
+          // 解析 Excel
+          // --------------------------------------------------
+
           const workbook = XLSX.read(buffer, {
             type: "array"
           });
@@ -104,19 +117,35 @@ export default {
             }
           );
 
-          // ===== 沒有異常資料 =====
+          // --------------------------------------------------
+          // 沒有異常資料
+          // --------------------------------------------------
+
           if (rows.length <= 1) {
 
+            const message =
+              `✅ ${fileName}\n\n今日沒有異常巡檢紀錄。`;
+
+            // 回覆傳檔案的人
             await replyMessage(
               event.replyToken,
-              `✅ ${fileName}\n\n今日沒有異常巡檢紀錄。`,
+              message,
+              env
+            );
+
+            // 群組也通知沒有異常
+            await pushMessage(
+              message,
               env
             );
 
             continue;
           }
 
-          // ===== 建立欄位索引 =====
+          // --------------------------------------------------
+          // 建立欄位索引
+          // --------------------------------------------------
+
           const headers = rows[0];
 
           const col = {};
@@ -125,7 +154,10 @@ export default {
             col[String(header).trim()] = index;
           });
 
-          // ===== 讀取資料 =====
+          // --------------------------------------------------
+          // 讀取資料
+          // --------------------------------------------------
+
           const records = rows
             .slice(1)
             .filter(row =>
@@ -148,7 +180,10 @@ export default {
               reason: getCell(row, col, "異常原因/現場狀況")
             }));
 
-          // ===== 組成漂亮報告 =====
+          // --------------------------------------------------
+          // 組成異常報告
+          // --------------------------------------------------
+
           let report = "🚨 化工廠巡檢異常\n\n";
 
           if (records[0].date) {
@@ -161,7 +196,10 @@ export default {
 
           report += `⚠️ 共 ${records.length} 項異常\n`;
 
-          // ===== 依廠區 + 設備分組 =====
+          // --------------------------------------------------
+          // 依廠區 + 設備分組
+          // --------------------------------------------------
+
           const groups = {};
 
           for (const record of records) {
@@ -206,7 +244,7 @@ export default {
                 report += "\n";
               }
 
-              // ===== 正常範圍 =====
+              // 正常範圍
               if (
                 record.lower !== "" &&
                 record.upper !== ""
@@ -266,21 +304,24 @@ export default {
           report += "\n━━━━━━━━━━━━━━\n";
           report += `📋 異常項目合計：${records.length}`;
 
-          // ===== 回覆傳送 Excel 的人 =====
+          // --------------------------------------------------
+          // 回覆傳 Excel 的人
+          // --------------------------------------------------
+
           await replyMessage(
             event.replyToken,
             report,
             env
           );
 
-          // ===== 如果 Excel 是在群組裡傳的，同時推播到該群組 =====
-          if (event.source?.type === "group") {
+          // --------------------------------------------------
+          // 推播到指定 LINE 群組
+          // --------------------------------------------------
 
-            await pushMessage(
-              report,
-              env
-            );
-          }
+          await pushMessage(
+            report,
+            env
+          );
         }
       }
 
@@ -303,7 +344,10 @@ export default {
 };
 
 
-// ===== 取得 Excel 儲存格 =====
+// ==================================================
+// 取得 Excel 儲存格
+// ==================================================
+
 function getCell(row, col, name) {
 
   const index = col[name];
@@ -316,7 +360,10 @@ function getCell(row, col, name) {
 }
 
 
-// ===== 回覆 LINE =====
+// ==================================================
+// LINE 回覆
+// ==================================================
+
 async function replyMessage(replyToken, text, env) {
 
   if (text.length > 4900) {
@@ -360,45 +407,13 @@ async function replyMessage(replyToken, text, env) {
 }
 
 
-// ===== LINE 群組推播 =====
+// ==================================================
+// LINE 群組推播
+// ==================================================
+
 async function pushMessage(text, env) {
 
   const response = await fetch(
     "https://api.line.me/v2/bot/message/push",
     {
-      method: "POST",
-
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization":
-          `Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}`
-      },
-
-      body: JSON.stringify({
-        to: env.LINE_GROUP_ID,
-
-        messages: [
-          {
-            type: "text",
-            text: text
-          }
-        ]
-      })
-    }
-  );
-
-  const result = await response.text();
-
-  console.log(
-    "LINE PUSH:",
-    response.status,
-    result
-  );
-
-  if (!response.ok) {
-
-    throw new Error(
-      `LINE Push API ${response.status}: ${result}`
-    );
-  }
-}
+   
