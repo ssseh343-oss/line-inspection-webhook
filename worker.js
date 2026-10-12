@@ -3,15 +3,15 @@ import * as XLSX from "xlsx";
 export default {
   async fetch(request, env) {
     if (request.method !== "POST") {
-      return new Response("LINE Inspection Webhook OK");
+      return new Response("LINE Inspection Webhook v1.1 OK");
     }
 
     try {
       const body = await request.json();
 
       for (const event of body.events || []) {
-if (event.source && event.source.type === "group") continue;
-
+        // Ignore messages sent inside groups; only process private messages.
+        if (event.source && event.source.type === "group") continue;
         if (event.type !== "message") continue;
 
         if (event.message.type === "text") {
@@ -69,17 +69,7 @@ async function excel(event, env) {
     { header: 1, defval: "" }
   );
 
-if (rows.length <= 1) {
-  const msg =
-    "✅ 化工廠巡檢完成\n\n" +
-    "📅 今日巡檢無異常";
-
-  await reply(event.replyToken, msg, env);
-  await push(msg, env);
-  return;
-}
-
-  const headers = rows[0];
+  const headers = rows[0] || [];
   const col = {};
 
   headers.forEach((h, i) => {
@@ -110,44 +100,97 @@ if (rows.length <= 1) {
     reason: get(row, "異常原因/現場狀況")
   }));
 
-  let msg = "🚨 化工廠巡檢異常\n\n";
+  // The "僅異常" sheet may contain both abnormal items and not-running items.
+  // Count each inspection item once, based on its status.
+  const notRunningRecords = records.filter(record =>
+    record.status.includes("未運轉")
+  );
+  const abnormalRecords = records.filter(record =>
+    !record.status.includes("未運轉")
+  );
 
-  if (records[0].date) {
-    msg += "📅 " + records[0].date + "\n";
+  const date = records.find(record => record.date)?.date || "";
+  const inspector = records.find(record => record.inspector)?.inspector || "";
+
+  // No records means no abnormal or not-running items were exported.
+  if (records.length === 0) {
+    const msg =
+      "✅ 化工廠巡檢完成\n\n" +
+      (date ? "📅 " + date + "\n" : "") +
+      (inspector ? "👤 巡檢人員：" + inspector + "\n" : "") +
+      "\n📋 巡檢統計\n" +
+      "🚨 巡檢異常：0 項\n" +
+      "⏸️ 設備未運轉：0 項\n\n" +
+      "✅ 今日巡檢無異常";
+
+    await reply(event.replyToken, msg, env);
+    await push(msg, env);
+    return;
   }
 
-  if (records[0].inspector) {
-    msg += "👤 " + records[0].inspector + "\n";
+  let msg = "📋 化工廠巡檢回報\n\n";
+
+  if (date) msg += "📅 " + date + "\n";
+  if (inspector) msg += "👤 巡檢人員：" + inspector + "\n";
+
+  msg += "\n📊 巡檢統計\n";
+  msg += "🚨 巡檢異常：" + abnormalRecords.length + " 項\n";
+  msg += "⏸️ 設備未運轉：" + notRunningRecords.length + " 項\n";
+
+  msg += "\n━━━━━━━━━━━━━━\n";
+  msg += "🚨 一、巡檢異常（" + abnormalRecords.length + " 項）\n";
+  msg += "━━━━━━━━━━━━━━\n";
+
+  if (abnormalRecords.length > 0) {
+    msg += renderGroups(abnormalRecords, "abnormal");
+  } else {
+    msg += "✅ 目前無巡檢異常\n";
   }
 
-  msg += "⚠️ 共 " + records.length + " 項異常\n";
+  msg += "\n\n══════════════\n";
+  msg += "⏸️ 二、設備未運轉（" + notRunningRecords.length + " 項）\n";
+  msg += "══════════════\n";
 
-  const groups = {};
+  if (notRunningRecords.length > 0) {
+    msg += renderGroups(notRunningRecords, "notRunning");
+  } else {
+    msg += "✅ 目前無設備未運轉紀錄\n";
+  }
+
+  msg += "\n\n━━━━━━━━━━━━━━\n";
+  msg += "📋 合計：" + records.length + " 項待關注紀錄";
+
+  await reply(event.replyToken, msg, env);
+  await push(msg, env);
+}
+
+function renderGroups(records, type) {
+  const groups = new Map();
 
   records.forEach(record => {
     const key = record.area + "|||" + record.equipment;
 
-    if (!groups[key]) {
-      groups[key] = {
+    if (!groups.has(key)) {
+      groups.set(key, {
         area: record.area,
         equipment: record.equipment,
         records: []
-      };
+      });
     }
 
-    groups[key].records.push(record);
+    groups.get(key).records.push(record);
   });
 
-  let n = 1;
+  let msg = "";
+  let groupNumber = 1;
 
-  Object.keys(groups).forEach(key => {
-    const g = groups[key];
+  for (const group of groups.values()) {
+    msg += "\n" + groupNumber + ". " +
+      (group.area || "未指定廠區") + "｜" +
+      (group.equipment || "未指定設備") + "\n";
 
-    msg += "\n━━━━━━━━━━━━━━\n";
-    msg += n + ". " + g.area + "｜" + g.equipment + "\n";
-
-    g.records.forEach(record => {
-      msg += "\n🔸 " + record.item + "\n";
+    for (const record of group.records) {
+      msg += "\n🔸 " + (record.item || "未指定巡檢項目") + "\n";
 
       if (record.value) {
         msg += "數值：" + record.value;
@@ -169,27 +212,22 @@ if (rows.length <= 1) {
         msg += "\n";
       }
 
-      if (record.status) {
-        msg += "狀態：" + record.status + "\n";
-      }
-
-      if (record.judgment) {
-        msg += "判定：" + record.judgment + "\n";
+      if (type === "notRunning") {
+        msg += "狀態：未運轉\n";
+      } else {
+        if (record.status) msg += "狀態：" + record.status + "\n";
+        if (record.judgment) msg += "判定：" + record.judgment + "\n";
       }
 
       if (record.reason) {
         msg += "處置／現場狀況：" + record.reason + "\n";
       }
-    });
+    }
 
-    n++;
-  });
+    groupNumber++;
+  }
 
-  msg += "\n━━━━━━━━━━━━━━\n";
-  msg += "📋 異常項目合計：" + records.length;
-
-  await reply(event.replyToken, msg, env);
-  await push(msg, env);
+  return msg.trimEnd();
 }
 
 async function reply(token, text, env) {
